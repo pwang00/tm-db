@@ -17,11 +17,12 @@ const (
 
 // memDBIterator is a memDB iterator.
 type memDBIterator struct {
-	ch     <-chan *item
+	ch     <-chan item
 	cancel context.CancelFunc
-	item   *item
+	item   item
 	start  []byte
 	end    []byte
+	valid  bool
 }
 
 var _ tmdb.Iterator = (*memDBIterator)(nil)
@@ -29,12 +30,13 @@ var _ tmdb.Iterator = (*memDBIterator)(nil)
 // newMemDBIterator creates a new memDBIterator.
 func newMemDBIterator(db *MemDB, start []byte, end []byte, reverse bool) *memDBIterator {
 	ctx, cancel := context.WithCancel(context.Background())
-	ch := make(chan *item, chBufferSize)
+	ch := make(chan item, chBufferSize)
 	iter := &memDBIterator{
 		ch:     ch,
 		cancel: cancel,
 		start:  start,
 		end:    end,
+		valid:  true,
 	}
 
 	db.mtx.RLock()
@@ -47,7 +49,7 @@ func newMemDBIterator(db *MemDB, start []byte, end []byte, reverse bool) *memDBI
 			abortLessThan []byte
 		)
 		visitor := func(i btree.Item) bool {
-			item := i.(*item)
+			item := i.(item)
 			if skipEqual != nil && bytes.Equal(item.key, skipEqual) {
 				skipEqual = nil
 				return true
@@ -98,7 +100,7 @@ func (i *memDBIterator) Close() error {
 	i.cancel()
 	for range i.ch { // drain channel
 	}
-	i.item = nil
+	i.valid = false
 	return nil
 }
 
@@ -109,7 +111,7 @@ func (i *memDBIterator) Domain() ([]byte, []byte) {
 
 // Valid implements Iterator.
 func (i *memDBIterator) Valid() bool {
-	return i.item != nil
+	return i.valid == true
 }
 
 // Next implements Iterator.
@@ -120,7 +122,7 @@ func (i *memDBIterator) Next() {
 	case ok:
 		i.item = item
 	default:
-		i.item = nil
+		i.valid = false
 	}
 }
 
